@@ -7,7 +7,12 @@
 // =============================================================================
 
 export interface Env {
-	SLACK_WEBHOOK_URL: string;
+	// Notification webhooks (at least one should be configured)
+	SLACK_WEBHOOK_URL?: string;
+	LARK_WEBHOOK_URL?: string;
+	DISCORD_WEBHOOK_URL?: string;
+
+	// Cloudflare API token for fetching build details
 	CLOUDFLARE_API_TOKEN: string;
 }
 

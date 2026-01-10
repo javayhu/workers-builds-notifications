@@ -4,14 +4,16 @@
 
 <!-- dash-content-start -->
 
-Get notified when your Workers Builds complete, fail, or are cancelled. This template uses [Queue Event Subscriptions](https://developers.cloudflare.com/queues/event-subscriptions/) to consume Workers Builds events and forward them to any webhook — Slack, Discord, or your own endpoint.
+Get notified when your Workers Builds complete, fail, or are cancelled. This template uses [Queue Event Subscriptions](https://developers.cloudflare.com/queues/event-subscriptions/) to consume Workers Builds events and forward them to **Slack, Lark/Feishu, Discord**, or any combination of these platforms.
 
 ## Features
 
 - 🔔 Real-time notifications for build success, failure, and cancellation
-- 🔗 Works with any webhook (Slack, Discord, custom endpoints)
+- 🔗 Multi-platform support: **Slack**, **Lark/Feishu**, and **Discord**
+- 🎯 Flexible configuration: use one or all platforms simultaneously
 - 📋 Includes build details: project name, branch, commit, and author
 - 📜 Smart error extraction for failed builds, preview URL and live deployment URL for successful builds
+- 🎨 Platform-optimized message formats (Block Kit for Slack, Interactive Cards for Lark, Embeds for Discord)
 
 ## How It Works
 
@@ -86,7 +88,9 @@ wrangler deploy
 
 ---
 
-### 3. Create a Webhook
+### 3. Create Webhooks
+
+Configure one or more platforms below. You can use all three simultaneously!
 
 #### Slack
 
@@ -94,18 +98,22 @@ wrangler deploy
 2. Name it (e.g., "Workers Builds Notifications") and select your workspace
 3. Go to **Incoming Webhooks** → Toggle **On**
 4. Click **Add New Webhook to Workspace** → Select your channel
-5. Copy the webhook URL
+5. Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
+
+#### Lark/Feishu
+
+1. Open your Lark/Feishu group chat
+2. Click on **Group Settings** (top right) → **Bots** → **Add Bot**
+3. Select **Custom Bot** → Enter a name and description
+4. Copy the webhook URL (starts with `https://open.feishu.cn/open-apis/bot/v2/hook/...`)
+5. Click **Finish**
 
 #### Discord
 
 1. Go to your Discord server → **Server Settings** → **Integrations** → **Webhooks**
-2. Click **New Webhook** → Select your channel
-3. Copy the webhook URL
-4. Append `/slack` to the URL (Discord supports Slack-formatted payloads)
-
-#### Other Webhooks
-
-Modify the payload format in `src/index.ts` to match your webhook's expected format.
+2. Click **New Webhook** → Name it and select your channel
+3. Copy the webhook URL (starts with `https://discord.com/api/webhooks/...`)
+4. Click **Save**
 
 ---
 
@@ -123,21 +131,33 @@ Modify the payload format in `src/index.ts` to match your webhook's expected for
 
 ### 5. Set Secrets
 
+Configure at least one webhook URL. You can add all three to send notifications to multiple platforms!
+
 #### Option A: Via Dashboard
 
 1. Go to [Workers & Pages](https://dash.cloudflare.com/?to=/:account/workers-and-pages)
 2. Select your deployed worker
 3. Go to **Settings** → **Variables and Secrets**
-4. Add:
-   - `SLACK_WEBHOOK_URL` → Your webhook URL
-   - `CLOUDFLARE_API_TOKEN` → Your API token
+4. Add (at least one webhook required):
+   - `SLACK_WEBHOOK_URL` → Your Slack webhook URL (optional)
+   - `LARK_WEBHOOK_URL` → Your Lark/Feishu webhook URL (optional)
+   - `DISCORD_WEBHOOK_URL` → Your Discord webhook URL (optional)
+   - `CLOUDFLARE_API_TOKEN` → Your API token (required)
 
 #### Option B: Via CLI
 
 ```bash
+# Add at least one webhook
 wrangler secret put SLACK_WEBHOOK_URL
-# Paste your webhook URL
+# Paste your Slack webhook URL (or skip)
 
+wrangler secret put LARK_WEBHOOK_URL
+# Paste your Lark webhook URL (or skip)
+
+wrangler secret put DISCORD_WEBHOOK_URL
+# Paste your Discord webhook URL (or skip)
+
+# Required: Cloudflare API token
 wrangler secret put CLOUDFLARE_API_TOKEN
 # Paste your API token
 ```
@@ -252,10 +272,14 @@ Trigger a build on any worker in your account. You should see a notification in 
 
 ### Environment Variables
 
-| Variable               | Description                                                                 |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `SLACK_WEBHOOK_URL`    | Webhook URL (Slack, Discord, or custom)                                     |
-| `CLOUDFLARE_API_TOKEN` | API token with Workers Builds Configuration: Read and Workers Scripts: Read |
+| Variable                | Required | Description                                                                  |
+| ----------------------- | -------- | ---------------------------------------------------------------------------- |
+| `SLACK_WEBHOOK_URL`     | No*      | Slack incoming webhook URL                                                   |
+| `LARK_WEBHOOK_URL`      | No*      | Lark/Feishu webhook URL                                                      |
+| `DISCORD_WEBHOOK_URL`   | No*      | Discord webhook URL                                                          |
+| `CLOUDFLARE_API_TOKEN`  | Yes      | API token with Workers Builds Configuration: Read and Workers Scripts: Read |
+
+\* At least one webhook URL must be configured
 
 ### Queue Settings (wrangler.jsonc)
 
@@ -288,6 +312,15 @@ The queue must be created before deploying. See [Step 1: Create a Queue](#1-crea
 
 - **Preview URL missing**: Build was for main/master branch (shows Live URL instead)
 - **Live URL missing**: Check token has correct permissions
+
+### Notifications not appearing in some platforms
+
+- Verify webhook URLs are correctly configured for each platform
+- Check worker logs for platform-specific errors
+- Test webhook URLs manually:
+  - **Slack**: Use `curl` to send a test message
+  - **Lark**: Verify webhook is not rate limited
+  - **Discord**: Ensure webhook URL is complete and valid
 
 ---
 

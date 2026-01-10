@@ -1,5 +1,5 @@
 /**
- * Slack Block Kit message formatting for build notifications.
+ * Slack notifier using Block Kit message formatting.
  */
 
 import type {
@@ -10,7 +10,8 @@ import type {
 	Button,
 } from "@slack/types";
 
-import type { CloudflareEvent } from "./types";
+import type { CloudflareEvent } from "../types";
+import type { Notifier, NotificationData } from "./base";
 import {
 	getBuildStatus,
 	isProductionBranch,
@@ -18,7 +19,7 @@ import {
 	getCommitUrl,
 	getDashboardUrl,
 	extractBuildError,
-} from "./helpers";
+} from "../helpers";
 
 // =============================================================================
 // TYPES
@@ -194,51 +195,44 @@ function buildFallbackMessage(event: CloudflareEvent): SlackPayload {
 }
 
 // =============================================================================
-// MAIN EXPORTS
+// NOTIFIER IMPLEMENTATION
 // =============================================================================
 
-/**
- * Builds a Slack Block Kit payload for a build event.
- */
-export function buildSlackPayload(
-	event: CloudflareEvent,
-	previewUrl: string | null,
-	liveUrl: string | null,
-	logs: string[],
-): SlackPayload {
-	const status = getBuildStatus(event);
-	const meta = event.payload?.buildTriggerMetadata;
-	const isProduction = isProductionBranch(meta?.branch);
+export class SlackNotifier implements Notifier {
+	readonly name = "Slack";
 
-	if (status.isSucceeded) {
-		return buildSuccessMessage(event, isProduction, previewUrl, liveUrl);
+	buildPayload(data: NotificationData): SlackPayload {
+		const { event, previewUrl, liveUrl, logs } = data;
+		const status = getBuildStatus(event);
+		const meta = event.payload?.buildTriggerMetadata;
+		const isProduction = isProductionBranch(meta?.branch);
+
+		if (status.isSucceeded) {
+			return buildSuccessMessage(event, isProduction, previewUrl, liveUrl);
+		}
+
+		if (status.isFailed) {
+			return buildFailureMessage(event, logs);
+		}
+
+		if (status.isCancelled) {
+			return buildCancelledMessage(event);
+		}
+
+		return buildFallbackMessage(event);
 	}
 
-	if (status.isFailed) {
-		return buildFailureMessage(event, logs);
-	}
+	async send(webhookUrl: string, payload: SlackPayload): Promise<void> {
+		const response = await fetch(webhookUrl, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+		});
 
-	if (status.isCancelled) {
-		return buildCancelledMessage(event);
-	}
-
-	return buildFallbackMessage(event);
-}
-
-/**
- * Sends a payload to a Slack webhook.
- */
-export async function sendSlackNotification(
-	webhookUrl: string,
-	payload: SlackPayload,
-): Promise<void> {
-	const response = await fetch(webhookUrl, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(payload),
-	});
-
-	if (!response.ok) {
-		console.error("Slack API error:", response.status, await response.text());
+		if (!response.ok) {
+			throw new Error(
+				`Slack API error: ${response.status} ${await response.text()}`,
+			);
+		}
 	}
 }

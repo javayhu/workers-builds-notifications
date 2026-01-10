@@ -1,6 +1,23 @@
+# ======================================
+# Notification Webhooks
+# Configure at least one platform below
+# ======================================
+
 # Slack incoming webhook URL
 # Get this from: https://api.slack.com/apps → Your App → Incoming Webhooks
 SLACK_WEBHOOK_URL=
+
+# Lark/Feishu webhook URL
+# Get this from: Lark → Group Settings → Bots → Add Bot → Custom Bot
+LARK_WEBHOOK_URL=
+
+# Discord webhook URL
+# Get this from: Discord Server → Settings → Integrations → Webhooks → New Webhook
+DISCORD_WEBHOOK_URL=
+
+# ======================================
+# Cloudflare API
+# ======================================
 
 # Cloudflare API token
 # Create a custom token at: https://dash.cloudflare.com/profile/api-tokens

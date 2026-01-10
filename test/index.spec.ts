@@ -98,10 +98,14 @@ describe("Workers Builds Notifications", () => {
 	const originalFetch = globalThis.fetch;
 	let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 	let slackPayloads: any[];
+	let larkPayloads: any[];
+	let discordPayloads: any[];
 
 	beforeEach(() => {
 		fetchCalls = [];
 		slackPayloads = [];
+		larkPayloads = [];
+		discordPayloads = [];
 	});
 
 	afterEach(() => {
@@ -119,9 +123,15 @@ describe("Workers Builds Notifications", () => {
 			const url = input.toString();
 			fetchCalls.push({ url, init });
 
-			// Capture Slack payloads for assertions
+			// Capture webhook payloads for assertions
 			if (url.includes("hooks.slack.com") && init?.body) {
 				slackPayloads.push(JSON.parse(init.body as string));
+			}
+			if (url.includes("open.feishu.cn") && init?.body) {
+				larkPayloads.push(JSON.parse(init.body as string));
+			}
+			if (url.includes("discord.com/api/webhooks") && init?.body) {
+				discordPayloads.push(JSON.parse(init.body as string));
 			}
 
 			return handler(url, init);
@@ -455,15 +465,20 @@ describe("Workers Builds Notifications", () => {
 	// =========================================================================
 
 	describe("Error Handling", () => {
-		it("should handle missing SLACK_WEBHOOK_URL gracefully", async () => {
+		it("should handle missing all webhook URLs gracefully", async () => {
 			const event = createMockEvent();
 			const messages = [createQueueMessage(event)];
 			const batch = createMessageBatch("builds-event-subscriptions", messages);
 
-			const envWithoutSlack = { ...env, SLACK_WEBHOOK_URL: "" };
+			const envWithoutWebhooks = {
+				...env,
+				SLACK_WEBHOOK_URL: "",
+				LARK_WEBHOOK_URL: "",
+				DISCORD_WEBHOOK_URL: "",
+			};
 
 			// Should not throw
-			await worker.queue(batch, envWithoutSlack as typeof env);
+			await worker.queue(batch, envWithoutWebhooks as typeof env);
 		});
 
 		it("should handle API errors gracefully and still send notification", async () => {
@@ -571,6 +586,175 @@ describe("Workers Builds Notifications", () => {
 			// Should not throw
 			await worker.queue(batch, env);
 			expect(slackPayloads).toHaveLength(1);
+		});
+	});
+
+	// =========================================================================
+	// MULTI-PLATFORM SUPPORT
+	// =========================================================================
+
+	describe("Multi-Platform Support", () => {
+		it("should send to multiple platforms simultaneously", async () => {
+			mockFetch((url) => {
+				if (url.includes("/builds/builds/") && !url.includes("/logs")) {
+					return new Response(JSON.stringify({ result: {} }));
+				}
+				if (url.includes("/subdomain")) {
+					return new Response(
+						JSON.stringify({ result: { subdomain: "test" } }),
+					);
+				}
+				if (url.includes("hooks.slack.com")) {
+					return new Response("ok");
+				}
+				if (url.includes("open.feishu.cn")) {
+					return new Response(JSON.stringify({ code: 0, msg: "success" }));
+				}
+				if (url.includes("discord.com/api/webhooks")) {
+					return new Response("", { status: 204 });
+				}
+				return new Response("Not found", { status: 404 });
+			});
+
+			const event = createMockEvent();
+			const messages = [createQueueMessage(event)];
+			const batch = createMessageBatch("builds-event-subscriptions", messages);
+
+			const multiPlatformEnv = {
+				...env,
+				LARK_WEBHOOK_URL: "https://open.feishu.cn/open-apis/bot/v2/hook/test",
+				DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/test",
+			};
+
+			await worker.queue(batch, multiPlatformEnv as typeof env);
+
+			// Should send to all three platforms
+			expect(slackPayloads).toHaveLength(1);
+			expect(larkPayloads).toHaveLength(1);
+			expect(discordPayloads).toHaveLength(1);
+
+			// Verify Slack format
+			expect(slackPayloads[0].blocks).toBeDefined();
+			expect(slackPayloads[0].blocks[0].text.text).toContain(
+				"Production Deploy",
+			);
+
+			// Verify Lark format
+			expect(larkPayloads[0].msg_type).toBe("interactive");
+			expect(larkPayloads[0].card).toBeDefined();
+			expect(larkPayloads[0].card.header.title.content).toContain(
+				"Production Deploy",
+			);
+
+			// Verify Discord format
+			expect(discordPayloads[0].embeds).toBeDefined();
+			expect(discordPayloads[0].embeds[0].title).toContain("Production Deploy");
+		});
+
+		it("should work with only Lark configured", async () => {
+			mockFetch((url) => {
+				if (url.includes("/builds/builds/") && !url.includes("/logs")) {
+					return new Response(JSON.stringify({ result: {} }));
+				}
+				if (url.includes("/subdomain")) {
+					return new Response(
+						JSON.stringify({ result: { subdomain: "test" } }),
+					);
+				}
+				if (url.includes("open.feishu.cn")) {
+					return new Response(JSON.stringify({ code: 0, msg: "success" }));
+				}
+				return new Response("Not found", { status: 404 });
+			});
+
+			const event = createMockEvent();
+			const messages = [createQueueMessage(event)];
+			const batch = createMessageBatch("builds-event-subscriptions", messages);
+
+			const larkOnlyEnv = {
+				...env,
+				SLACK_WEBHOOK_URL: "",
+				LARK_WEBHOOK_URL: "https://open.feishu.cn/open-apis/bot/v2/hook/test",
+			};
+
+			await worker.queue(batch, larkOnlyEnv as typeof env);
+
+			expect(slackPayloads).toHaveLength(0);
+			expect(larkPayloads).toHaveLength(1);
+			expect(discordPayloads).toHaveLength(0);
+		});
+
+		it("should work with only Discord configured", async () => {
+			mockFetch((url) => {
+				if (url.includes("/builds/builds/") && !url.includes("/logs")) {
+					return new Response(JSON.stringify({ result: {} }));
+				}
+				if (url.includes("/subdomain")) {
+					return new Response(
+						JSON.stringify({ result: { subdomain: "test" } }),
+					);
+				}
+				if (url.includes("discord.com/api/webhooks")) {
+					return new Response("", { status: 204 });
+				}
+				return new Response("Not found", { status: 404 });
+			});
+
+			const event = createMockEvent();
+			const messages = [createQueueMessage(event)];
+			const batch = createMessageBatch("builds-event-subscriptions", messages);
+
+			const discordOnlyEnv = {
+				...env,
+				SLACK_WEBHOOK_URL: "",
+				DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/test",
+			};
+
+			await worker.queue(batch, discordOnlyEnv as typeof env);
+
+			expect(slackPayloads).toHaveLength(0);
+			expect(larkPayloads).toHaveLength(0);
+			expect(discordPayloads).toHaveLength(1);
+		});
+
+		it("should continue sending to other platforms if one fails", async () => {
+			mockFetch((url) => {
+				if (url.includes("/builds/builds/") && !url.includes("/logs")) {
+					return new Response(JSON.stringify({ result: {} }));
+				}
+				if (url.includes("/subdomain")) {
+					return new Response(
+						JSON.stringify({ result: { subdomain: "test" } }),
+					);
+				}
+				if (url.includes("hooks.slack.com")) {
+					return new Response("Error", { status: 500 }); // Slack fails
+				}
+				if (url.includes("open.feishu.cn")) {
+					return new Response(JSON.stringify({ code: 0, msg: "success" }));
+				}
+				if (url.includes("discord.com/api/webhooks")) {
+					return new Response("", { status: 204 });
+				}
+				return new Response("Not found", { status: 404 });
+			});
+
+			const event = createMockEvent();
+			const messages = [createQueueMessage(event)];
+			const batch = createMessageBatch("builds-event-subscriptions", messages);
+
+			const multiPlatformEnv = {
+				...env,
+				LARK_WEBHOOK_URL: "https://open.feishu.cn/open-apis/bot/v2/hook/test",
+				DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/test",
+			};
+
+			// Should not throw even if Slack fails
+			await worker.queue(batch, multiPlatformEnv as typeof env);
+
+			// Lark and Discord should still receive notifications
+			expect(larkPayloads).toHaveLength(1);
+			expect(discordPayloads).toHaveLength(1);
 		});
 	});
 

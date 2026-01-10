@@ -1,8 +1,8 @@
 /**
- * Cloudflare Workers Builds → Slack Notifications
+ * Cloudflare Workers Builds → Multi-Platform Notifications
  *
  * This worker consumes build events from a Cloudflare Queue and sends
- * notifications to Slack with:
+ * notifications to Slack, Lark, Discord, or any combination of these platforms:
  * - Preview/Live URLs for successful builds
  * - Error messages for failed builds
  * - Cancellation notices for cancelled builds
@@ -15,12 +15,18 @@
 import type { Env, CloudflareEvent } from "./types";
 import { getBuildStatus } from "./helpers";
 import { fetchBuildUrls, fetchBuildLogs } from "./api";
-import { buildSlackPayload, sendSlackNotification } from "./slack";
+import { sendNotifications } from "./notificationManager";
 
 export default {
 	async queue(batch: MessageBatch<CloudflareEvent>, env: Env): Promise<void> {
-		if (!env.SLACK_WEBHOOK_URL) {
-			console.error("SLACK_WEBHOOK_URL is not configured");
+		// Check if at least one webhook is configured
+		const hasWebhook =
+			env.SLACK_WEBHOOK_URL || env.LARK_WEBHOOK_URL || env.DISCORD_WEBHOOK_URL;
+
+		if (!hasWebhook) {
+			console.error(
+				"No webhook URLs configured. Set SLACK_WEBHOOK_URL, LARK_WEBHOOK_URL, or DISCORD_WEBHOOK_URL.",
+			);
 			for (const message of batch.messages) {
 				message.ack();
 			}
@@ -57,9 +63,8 @@ export default {
 					logs = await fetchBuildLogs(event, env);
 				}
 
-				// Build and send Slack notification
-				const payload = buildSlackPayload(event, previewUrl, liveUrl, logs);
-				await sendSlackNotification(env.SLACK_WEBHOOK_URL, payload);
+				// Send notifications to all configured platforms
+				await sendNotifications({ event, previewUrl, liveUrl, logs }, env);
 
 				message.ack();
 			} catch (error) {
